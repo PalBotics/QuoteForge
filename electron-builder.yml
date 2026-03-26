@@ -1,0 +1,24 @@
+appId: com.draftek.quoteforge
+productName: QuoteForge
+files:
+  - main.js
+  - preload.js
+  - renderer/**
+  - assets/**
+  - package.json
+extraMetadata:
+  main: main.js
+directories:
+  output: dist
+win:
+  target:
+    - nsis
+  artifactName: QuoteForge-${version}-setup.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+mac:
+  target:
+    - dmg
+  artifactName: QuoteForge-${version}.${ext}

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QuoteForge</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">QuoteForge</div>
+        <div class="sub-brand">Draftek Design</div>
+        <nav id="nav-sections" class="nav-sections">
+          <button data-section="newQuote" class="active">New Quote</button>
+          <button data-section="history">Quote History</button>
+          <button data-section="clients">Client Address Book</button>
+          <button data-section="settings">Settings</button>
+        </nav>
+      </aside>
+
+      <main class="content">
+        <section id="section-newQuote" class="section active">
+          <header class="section-header">
+            <h1>New Quote</h1>
+            <p>AI-powered 3-step quote generation workflow.</p>
+          </header>
+
+          <div class="steps-row">
+            <button id="step1-btn" class="step-btn active">1. Project Info</button>
+            <button id="step2-btn" class="step-btn" disabled>2. AI Scope Chat</button>
+            <button id="step3-btn" class="step-btn" disabled>3. Preview + Export</button>
+          </div>
+
+          <div id="step1" class="step-panel active"></div>
+          <div id="step2" class="step-panel"></div>
+          <div id="step3" class="step-panel"></div>
+        </section>
+
+        <section id="section-history" class="section">
+          <header class="section-header">
+            <h1>Quote History</h1>
+            <p>Saved quotes, statuses, and read-only previews.</p>
+          </header>
+          <div id="history-root"></div>
+        </section>
+
+        <section id="section-clients" class="section">
+          <header class="section-header">
+            <h1>Client Address Book</h1>
+            <p>Add, edit, and remove client records.</p>
+          </header>
+          <div id="clients-root"></div>
+        </section>
+
+        <section id="section-settings" class="section">
+          <header class="section-header">
+            <h1>Settings</h1>
+            <p>Business profile, defaults, logo, and API key.</p>
+          </header>
+          <div id="settings-root"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
