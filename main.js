@@ -1,3 +1,220 @@
+const {
+  Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+  AlignmentType, ImageRun, WidthType, ShadingType, BorderStyle
+} = require('docx');
+
+function docxTr(run) { return new TextRun({ font: 'Georgia', size: 22, ...run }); }
+
+function docxPara(runs, opts = {}) {
+  return new Paragraph({ children: Array.isArray(runs) ? runs : [runs], ...opts });
+}
+
+function docxCell(paragraphs, { fill, span } = {}) {
+  return new TableCell({
+    children: paragraphs,
+    columnSpan: span,
+    verticalAlign: 'center',
+    shading: fill ? { fill, type: ShadingType.CLEAR, color: 'auto' } : undefined,
+    margins: { top: 60, bottom: 60, left: 80, right: 80 }
+  });
+}
+
+async function saveDocx({ quoteNumber, quoteDate, logoPath, quotePayload, projectForm, settings }) {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save Quote as Word Document',
+    defaultPath: `Draftek_Design_Quote_${quoteNumber}.docx`,
+    filters: [{ name: 'Word Document', extensions: ['docx'] }]
+  });
+  if (result.canceled || !result.filePath) return { canceled: true };
+
+  try {
+    const NAVY = '042C53';
+    const WHITE = 'FFFFFF';
+    const GRAY = 'F8FAFC';
+    const TC_BG = 'F0F4F8';
+    const children = [];
+
+    // ── Header: Logo (left) + Quote number (right) ──────────────────────────
+    let logoImageRun = null;
+    try {
+      const activeLogo = logoPath || getActiveLogoPath();
+      if (activeLogo && fs.existsSync(activeLogo)) {
+        const imgBuf = await fsp.readFile(activeLogo);
+        // Detect actual format from magic bytes (file extension may lie)
+        const isJpeg = imgBuf[0] === 0xFF && imgBuf[1] === 0xD8;
+        const isPng  = imgBuf[0] === 0x89 && imgBuf[1] === 0x50;
+        const imgType = isJpeg ? 'jpg' : isPng ? 'png' : null;
+        if (imgType) {
+          // Read actual pixel dimensions to preserve aspect ratio
+          let imgW = 0, imgH = 0;
+          if (isPng) {
+            imgW = imgBuf.readUInt32BE(16);
+            imgH = imgBuf.readUInt32BE(20);
+          } else {
+            // JPEG: scan for SOF marker
+            let p = 2;
+            while (p < imgBuf.length - 8) {
+              if (imgBuf[p] !== 0xFF) { p++; continue; }
+              const mk = imgBuf[p + 1];
+              if (mk >= 0xC0 && mk <= 0xCF && mk !== 0xC4 && mk !== 0xCC) {
+                imgH = (imgBuf[p + 5] << 8) | imgBuf[p + 6];
+                imgW = (imgBuf[p + 7] << 8) | imgBuf[p + 8];
+                break;
+              }
+              const segLen = (imgBuf[p + 2] << 8) | imgBuf[p + 3];
+              p += 2 + segLen;
+            }
+          }
+          const TARGET_W = 220;
+          const displayH = (imgW > 0 && imgH > 0)
+            ? Math.round(TARGET_W * imgH / imgW)
+            : Math.round(TARGET_W * 0.44);   // fallback to ~44% ratio
+          logoImageRun = new ImageRun({ data: imgBuf, transformation: { width: TARGET_W, height: displayH }, type: imgType });
+        }
+      }
+    } catch (_) {}
+
+    children.push(
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, insideH: { style: BorderStyle.NONE }, insideV: { style: BorderStyle.NONE } },
+        rows: [new TableRow({ children: [
+          docxCell([docxPara(logoImageRun ? [logoImageRun] : [docxTr({ text: settings.businessName || 'Draftek Design, LLC', bold: true, size: 26 })])], {}),
+          docxCell([docxPara([docxTr({ text: `QUOTE: ${quoteNumber}`, bold: true, color: NAVY, size: 28 })], { alignment: AlignmentType.RIGHT })], {})
+        ] })]
+      })
+    );
+
+    // ── Horizontal rule (thick navy bottom border) ───────────────────────────
+    children.push(new Paragraph({
+      border: { bottom: { style: BorderStyle.THICK, size: 28, color: NAVY } },
+      spacing: { before: 80, after: 160 }
+    }));
+
+    // ── Date ────────────────────────────────────────────────────────────────
+    children.push(docxPara([
+      docxTr({ text: 'Date: ', bold: true }),
+      docxTr({ text: quoteDate || '' })
+    ], { spacing: { after: 60 } }));
+
+    // ── Client block ─────────────────────────────────────────────────────────
+    if (projectForm.clientName) children.push(docxPara([docxTr({ text: projectForm.clientName || '', bold: true })], { spacing: { after: 0 } }));
+    if (projectForm.clientTitle) children.push(docxPara([docxTr({ text: projectForm.clientTitle || '' })], { spacing: { after: 0 } }));
+    if (projectForm.company) children.push(docxPara([docxTr({ text: projectForm.company || '' })], { spacing: { after: 0 } }));
+    const addr1 = [projectForm.address1, projectForm.address2].filter(Boolean).join(', ');
+    const addr2 = [projectForm.city, projectForm.state, projectForm.zip].filter(Boolean).join(' ');
+    if (addr1) children.push(docxPara([docxTr({ text: addr1 })], { spacing: { after: 0 } }));
+    if (addr2) children.push(docxPara([docxTr({ text: addr2 })], { spacing: { after: 0 } }));
+    if (projectForm.phone) children.push(docxPara([docxTr({ text: projectForm.phone || '' })], { spacing: { after: 0 } }));
+    if (projectForm.email) children.push(docxPara([docxTr({ text: projectForm.email || '' })], { spacing: { after: 100 } }));
+
+    // ── Re: ──────────────────────────────────────────────────────────────────
+    children.push(docxPara([
+      docxTr({ text: 'Re: ', bold: true }),
+      docxTr({ text: projectForm.projectName || '' })
+    ], { spacing: { before: 80, after: 160 } }));
+
+    // ── Greeting + scope narrative ────────────────────────────────────────────
+    children.push(docxPara([docxTr({ text: quotePayload.greeting || `Hi ${projectForm.clientName || ''},` })], { spacing: { after: 80 } }));
+    children.push(docxPara([docxTr({ text: quotePayload.scopeNarrative || '' })], { spacing: { after: 160 } }));
+
+    // ── Line items table ──────────────────────────────────────────────────────
+    const hdrCell = (text) => docxCell([docxPara([docxTr({ text, bold: true, color: WHITE })], { alignment: AlignmentType.LEFT })], { fill: NAVY });
+    const hdrCellR = (text) => docxCell([docxPara([docxTr({ text, bold: true, color: WHITE })], { alignment: AlignmentType.RIGHT })], { fill: NAVY });
+
+    const tableRows = [
+      new TableRow({ children: [hdrCell('Phase/Task'), hdrCell('Description'), hdrCellR('Est. Hrs'), hdrCellR('Rate'), hdrCellR('Cost')] })
+    ];
+
+    (quotePayload.lineItems || []).forEach((item, i) => {
+      const rowFill = i % 2 === 1 ? GRAY : undefined;
+      tableRows.push(new TableRow({ children: [
+        docxCell([docxPara([docxTr({ text: item.phase || '' })])], { fill: rowFill }),
+        docxCell([docxPara([docxTr({ text: item.description || '' })])], { fill: rowFill }),
+        docxCell([docxPara([docxTr({ text: item.isFixed ? '' : String(item.hours || '') })], { alignment: AlignmentType.RIGHT })], { fill: rowFill }),
+        docxCell([docxPara([docxTr({ text: item.isFixed ? '' : `$${Number(item.rate || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })], { alignment: AlignmentType.RIGHT })], { fill: rowFill }),
+        docxCell([docxPara([docxTr({ text: `$${Number(item.cost || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` })], { alignment: AlignmentType.RIGHT })], { fill: rowFill })
+      ] }));
+    });
+
+    const nteFormatted = `$${Number(quotePayload.nteTotal || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    tableRows.push(new TableRow({ children: [
+      docxCell([docxPara([docxTr({ text: 'Not-to-Exceed Total', bold: true, color: WHITE })], {})], { fill: NAVY, span: 4 }),
+      docxCell([docxPara([docxTr({ text: nteFormatted, bold: true, color: WHITE })], { alignment: AlignmentType.RIGHT })], { fill: NAVY })
+    ] }));
+
+    children.push(new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: tableRows
+    }));
+    children.push(new Paragraph({ spacing: { after: 120 } }));
+
+    // ── Deliverables ─────────────────────────────────────────────────────────
+    children.push(docxPara([docxTr({ text: 'Deliverables', bold: true })], { spacing: { before: 120, after: 60 } }));
+    (quotePayload.deliverables || []).forEach(d => {
+      children.push(new Paragraph({
+        bullet: { level: 0 },
+        children: [docxTr({ text: d })],
+        spacing: { after: 40 }
+      }));
+    });
+
+    // ── Timeline ──────────────────────────────────────────────────────────────
+    children.push(docxPara([
+      docxTr({ text: 'Estimated Timeline: ', bold: true }),
+      docxTr({ text: quotePayload.timeline || '' })
+    ], { spacing: { before: 120, after: 120 } }));
+
+    // ── Closing + signature ───────────────────────────────────────────────────
+    children.push(docxPara([docxTr({ text: 'I am looking forward to working with you on this project.' })], { spacing: { before: 120, after: 240 } }));
+    children.push(docxPara([docxTr({ text: settings.ownerName || '', italics: true, font: 'Georgia' })], { spacing: { after: 0 } }));
+    children.push(docxPara([docxTr({ text: settings.businessName || '' })], { spacing: { after: 0 } }));
+    children.push(docxPara([docxTr({ text: settings.phone || '' })], { spacing: { after: 160 } }));
+
+    // ── Terms & Conditions ────────────────────────────────────────────────────
+    const termsText = settings?.terms || defaultTermsText();
+    children.push(docxPara([docxTr({ text: 'Terms & Conditions', bold: true })], {
+      border: { left: { style: BorderStyle.THICK, size: 16, color: NAVY } },
+      indent: { left: 200 },
+      shading: { fill: TC_BG, type: ShadingType.CLEAR, color: 'auto' },
+      spacing: { before: 0, after: 0 }
+    }));
+    termsText.split('\n').filter(l => l.trim()).forEach(line => {
+      children.push(docxPara([docxTr({ text: line })], {
+        border: { left: { style: BorderStyle.THICK, size: 16, color: NAVY } },
+        indent: { left: 200 },
+        shading: { fill: TC_BG, type: ShadingType.CLEAR, color: 'auto' },
+        spacing: { after: 0 }
+      }));
+    });
+    children.push(new Paragraph({ spacing: { after: 120 } }));
+
+    // ── Footer (navy bar with address) ────────────────────────────────────────
+    const footerAddr = [settings.address1, settings.address2, settings.cityStateZip].filter(Boolean).join(', ');
+    children.push(new Paragraph({
+      children: [docxTr({ text: footerAddr, color: WHITE, size: 18 })],
+      alignment: AlignmentType.CENTER,
+      shading: { fill: NAVY, type: ShadingType.CLEAR, color: 'auto' },
+      spacing: { before: 320, after: 0 },
+      border: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE } }
+    }));
+
+    const doc = new Document({
+      styles: { default: { document: { run: { font: 'Georgia', size: 22 } } } },
+      sections: [{ properties: { page: { margin: { top: 720, right: 900, bottom: 720, left: 900 } } }, children }]
+    });
+
+    const buffer = await Packer.toBuffer(doc);
+    await fsp.writeFile(result.filePath, buffer);
+    return { canceled: false, filePath: result.filePath };
+  } catch (err) {
+    return { canceled: true, error: 'Failed to generate Word document. ' + (err?.message || String(err)) };
+  }
+}
+
+function defaultTermsText() {
+  return 'Payment schedule: Bi-weekly invoicing based on progress.\nScope change rate: $125 per hour.\nQuote validity: This quote expires in 30 days.\nRetainer requirement: 50% retainer due at project start.';
+}
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -146,6 +363,56 @@ function getActiveLogoPath() {
   return DEFAULT_LOGO;
 }
 
+function buildClientRecord(input = {}, withId = true) {
+  const address1 = input.address1 || '';
+  const address2 = input.address2 || '';
+  const city = input.city || '';
+  const state = input.state || '';
+  const zip = input.zip || '';
+  const legacyAddress = input.address || '';
+
+  return {
+    ...(withId ? { id: input.id || randomUUID() } : {}),
+    name: input.name || '',
+    title: input.title || '',
+    company: input.company || '',
+    phone: input.phone || '',
+    email: input.email || '',
+    address1: address1 || legacyAddress,
+    address2,
+    city,
+    state,
+    zip,
+    // Keep a flattened address for compatibility with older records/reads.
+    address: input.address || ''
+  };
+}
+
+function normalizeText(value) {
+  return `${value || ''}`.trim().toLowerCase();
+}
+
+function isDuplicateClient(clients, candidate, excludeId = '') {
+  const name = normalizeText(candidate.name);
+  const company = normalizeText(candidate.company);
+  const email = normalizeText(candidate.email);
+
+  return (clients || []).some((existing) => {
+    if (excludeId && existing.id === excludeId) {
+      return false;
+    }
+
+    const existingEmail = normalizeText(existing.email);
+    if (email && existingEmail && email === existingEmail) {
+      return true;
+    }
+
+    const existingName = normalizeText(existing.name);
+    const existingCompany = normalizeText(existing.company);
+    return Boolean(name) && existingName === name && existingCompany === company;
+  });
+}
+
 function quoteAssistantSystemPrompt() {
   return [
     'You are Paul Lydick\'s quoting assistant for Draftek Design, LLC.',
@@ -263,6 +530,32 @@ function validateReadyQuote(payload) {
   }
 }
 
+async function imageFileToDataUri(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return '';
+  }
+
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeMap = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.svg': 'image/svg+xml'
+  };
+  const mime = mimeMap[ext] || 'application/octet-stream';
+  const fileBuffer = await fsp.readFile(filePath);
+  return `data:${mime};base64,${fileBuffer.toString('base64')}`;
+}
+
+async function embedLogoForPdf(html, logoPath) {
+  const dataUri = await imageFileToDataUri(logoPath || getActiveLogoPath());
+  if (!dataUri) {
+    return html;
+  }
+
+  return `${html || ''}`.replace(/(<img[^>]*class="quote-logo"[^>]*src=")([^"]+)("[^>]*>)/i, `$1${dataUri}$3`);
+}
+
 async function runQuoteChat({ messages, projectInfo, forceJson }) {
   if (!anthropicClient || !currentApiKey) {
     throw new Error('Anthropic API key is missing. Add it in Settings.');
@@ -321,7 +614,7 @@ async function runQuoteChat({ messages, projectInfo, forceJson }) {
   };
 }
 
-async function savePdf({ html, quoteNumber }) {
+async function savePdf({ html, quoteNumber, logoPath }) {
   const result = await dialog.showSaveDialog(mainWindow, {
     title: 'Save Quote PDF',
     defaultPath: `Draftek_Design_Quote_${quoteNumber}.pdf`,
@@ -339,7 +632,8 @@ async function savePdf({ html, quoteNumber }) {
     }
   });
 
-  await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  const htmlForPdf = await embedLogoForPdf(html, logoPath);
+  await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlForPdf)}`);
   const pdfBuffer = await pdfWindow.webContents.printToPDF({
     printBackground: true,
     pageSize: 'Letter'
@@ -373,6 +667,9 @@ function createWindow() {
 }
 
 function setupIpc() {
+    ipcMain.handle('docx:save', async (_event, payload) => {
+      return saveDocx(payload || {});
+    });
   ipcMain.handle('app:get-initial-state', async () => {
     const data = await readData();
     return {
@@ -411,16 +708,9 @@ function setupIpc() {
 
     const client = payload.client || {};
     if (client.name) {
-      const existing = data.clients.find((c) => c.name.toLowerCase() === client.name.toLowerCase());
+      const existing = isDuplicateClient(data.clients, client);
       if (!existing) {
-        data.clients.push({
-          id: randomUUID(),
-          name: client.name || '',
-          title: client.title || '',
-          company: client.company || '',
-          phone: client.phone || '',
-          address: client.address || ''
-        });
+        data.clients.push(buildClientRecord(client));
       }
     }
 
@@ -444,14 +734,10 @@ function setupIpc() {
 
   ipcMain.handle('clients:add', async (_event, client) => {
     const data = await readData();
-    const next = {
-      id: randomUUID(),
-      name: client.name || '',
-      title: client.title || '',
-      company: client.company || '',
-      phone: client.phone || '',
-      address: client.address || ''
-    };
+    if (isDuplicateClient(data.clients, client)) {
+      throw new Error('Duplicate client entry detected. Please review name/company/email.');
+    }
+    const next = buildClientRecord(client);
     data.clients.push(next);
     await writeData(data);
     return next;
@@ -463,13 +749,10 @@ function setupIpc() {
     if (!target) {
       throw new Error('Client not found.');
     }
-    Object.assign(target, {
-      name: client.name || '',
-      title: client.title || '',
-      company: client.company || '',
-      phone: client.phone || '',
-      address: client.address || ''
-    });
+    if (isDuplicateClient(data.clients, client, client.id)) {
+      throw new Error('Duplicate client entry detected. Please review name/company/email.');
+    }
+    Object.assign(target, buildClientRecord(client, false));
     await writeData(data);
     return target;
   });

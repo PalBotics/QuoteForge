@@ -140,7 +140,7 @@ button {
   font: inherit;
 }
 
-input,
+input:not([type="checkbox"]):not([type="radio"]),
 select,
 textarea {
   width: 100%;
@@ -148,6 +148,25 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 9px 10px;
+}
+
+#services-checks {
+  gap: 10px 18px;
+}
+
+#services-checks .service-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+#services-checks .service-option input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  flex: 0 0 auto;
+  accent-color: var(--navy);
 }
 
 textarea {

@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('quoteForgeApi', {
   generateQuoteNumber: () => ipcRenderer.invoke('app:generate-quote-number'),
   chatTurn: (payload) => ipcRenderer.invoke('ai:chat-turn', payload),
   savePdf: (payload) => ipcRenderer.invoke('pdf:save', payload),
+  saveDocx: (payload) => ipcRenderer.invoke('docx:save', payload),
   saveQuoteHistory: (payload) => ipcRenderer.invoke('quotes:save-history', payload),
   updateQuoteStatus: (payload) => ipcRenderer.invoke('quotes:update-status', payload),
   addClient: (payload) => ipcRenderer.invoke('clients:add', payload),
